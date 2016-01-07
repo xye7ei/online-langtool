@@ -63,13 +63,18 @@
 
 ;; Private utility functions.
 
-(defun --online-langtool-request (str)
-  "Request for checking with given argument `str'.
-Returns a string as parsed xml as a list. "
+(defun --online-langtool-encode (str)
+  "Encode a sentence or paragraph `str' into a https-request."
   (let* ((str (replace-regexp-in-string "[\n\t ]+$" "" str))
 	 (req (format --lang-req-pat
 		      --online-langtool-default-language str))
-	 (enc (url-encode-url req))
+	 (enc (url-encode-url req)))
+    enc))
+
+(defun --online-langtool-request (str)
+  "Request for checking with given argument `str'.
+Returns a string as parsed xml as a list. "
+  (let* ((enc (--online-langtool-encode str))
 	 (buf1 (url-retrieve-synchronously enc)))
     (with-current-buffer buf1
       (goto-char url-http-end-of-headers)
@@ -127,7 +132,7 @@ into `--online-langtool-active-overlays' for further looping."
 
 ;; Final interactive functions for external use.
 
-(defun -online-langtool-set-language (arg)
+(defun online-langtool-set-language (arg)
   "Prompt user to choose a default language for grammar
 checking."
   (interactive
@@ -137,7 +142,7 @@ checking."
   (when (member arg --online-langtool-language-list)
     (setq --online-langtool-default-language arg)))
 
-(defun -online-langtool-clear-all ()
+(defun online-langtool-clear-all ()
   "Clear all current error information by both destructing the
 overlays and clear the stack of overlays."
   (interactive)
@@ -145,15 +150,25 @@ overlays and clear the stack of overlays."
     (pop --online-langtool-active-overlays))
   (remove-overlays))
 
-(defun -online-langtool-check-region (begin end)
+(defun online-langtool-check-region (begin end)
   "Perform grammar check for marked region. Clear all results
-before."
+before. A sentence which is too short is not to be checked."
   (interactive "r")
-  (-online-langtool-clear-all)
-  (let* ((str (buffer-substring-no-properties begin end)))
-    (--online-langtool-gen-overlays str begin end)))
+  (online-langtool-clear-all)
+  (save-excursion
+    (if (> (- end begin) 5)
+	(let* ((str (buffer-substring-no-properties begin end)))
+	  (--online-langtool-gen-overlays str begin end))
+      (message "Sentence too short."))))
 
-(defun -online-langtool-loop-overlays ()
+(defun online-langtool-check-paragraph ()
+  (interactive)
+  (save-excursion
+    (deactivate-mark)
+    (mark-paragraph)
+    (call-interactively 'online-langtool-check-region)))
+
+(defun online-langtool-loop-overlays ()
   "Loop through the overlays and get hints for correction."
   (interactive)
   (require 'popup nil t)
@@ -193,10 +208,10 @@ before."
 
 (defvar online-langtool-keymap
   (let ((mp (make-sparse-keymap)))
-    (define-key mp (kbd "C-c M-h") '-online-langtool-check-region)
-    (define-key mp (kbd "C-c M-c") '-online-langtool-clear-all)
-    (define-key mp (kbd "C-c M-n") '-online-langtool-loop-overlays)
-    (define-key mp (kbd "C-c M-l") '-online-langtool-set-language)
+    (define-key mp (kbd "C-c M-r") 'online-langtool-check-region)
+    (define-key mp (kbd "C-c M-c") 'online-langtool-clear-all)
+    (define-key mp (kbd "C-c M-n") 'online-langtool-loop-overlays)
+    (define-key mp (kbd "C-c M-l") 'online-langtool-set-language)
     mp)
   "Keymap for using checking functionalities.")
 
