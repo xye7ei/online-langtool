@@ -160,7 +160,9 @@ before. A sentence which is too short is not to be checked."
 	(let* ((str (buffer-substring-no-properties begin end)))
 	  (--online-langtool-gen-overlays str begin end))
       (message "Sentence too short.")))
-  (deactivate-mark))
+  (deactivate-mark)
+  (when (< (length --online-langtool-active-overlays) 1)
+    (message "No syntactic error found(Maybe unable to find). ")))
 
 (defun online-langtool-check-paragraph ()
   (interactive)
@@ -210,6 +212,7 @@ before. A sentence which is too short is not to be checked."
 (defvar online-langtool-keymap
   (let ((mp (make-sparse-keymap)))
     (define-key mp (kbd "C-c M-r") 'online-langtool-check-region)
+    (define-key mp (kbd "C-c M-h") 'online-langtool-check-paragraph)
     (define-key mp (kbd "C-c M-c") 'online-langtool-clear-all)
     (define-key mp (kbd "C-c M-n") 'online-langtool-loop-overlays)
     (define-key mp (kbd "C-c M-l") 'online-langtool-set-language)
