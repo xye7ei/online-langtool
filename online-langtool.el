@@ -159,7 +159,8 @@ before. A sentence which is too short is not to be checked."
     (if (> (- end begin) 5)
 	(let* ((str (buffer-substring-no-properties begin end)))
 	  (--online-langtool-gen-overlays str begin end))
-      (message "Sentence too short."))))
+      (message "Sentence too short.")))
+  (deactivate-mark))
 
 (defun online-langtool-check-paragraph ()
   (interactive)
