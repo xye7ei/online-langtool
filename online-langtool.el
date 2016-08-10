@@ -37,19 +37,28 @@
 
 ;; Variables on module level.
 
-(defvar --lang-req-pat
+(defgroup online-langtool nil
+  "Minor mode for online LangTool unilities."
+  :prefix "online-langtool"
+  :group 'languages)
+
+(defvar online-langtool--request-pattern-ginger
+  "http://services.gingersoftware.com/Ginger/correct/json/GingerTheText?lang=US&clientVersion=2.0&apiKey=6ae0c3a0-afdc-4532-a810-82ded0054236&text=%s."
+  "The pattern of url-request for sending yet to be checked text.")
+
+(defvar online-langtool--request-pattern
   "https://languagetool.org:8081/?language=%s&text=%s"
   "The pattern of url-request for sending yet to be checked text.")
 
-(defvar --online-langtool-default-language
+(defvar online-langtool--default-language
   "en-US"
   "Active language environment for checking.")
 
-(defvar --online-langtool-active-overlays
+(defvar online-langtool--active-overlays
   nil
   "The cache stack to store unhandled grammar errors.")
 
-(defvar --online-langtool-language-list
+(defvar online-langtool--language-list
   '("en-US" "de-DE" "cn-CN")
   "A list of usual languages environment available for checking.")
 
@@ -63,27 +72,58 @@
 
 ;; Private utility functions.
 
-(defun --online-langtool-encode (str)
-  "Encode a sentence or paragraph `str' into a https-request."
-  (let* ((str (replace-regexp-in-string "[\n\t ]+$" "" str))
-	 (req (format --lang-req-pat
-		      --online-langtool-default-language str))
-	 (enc (url-encode-url req)))
-    enc))
-
-(defun --online-langtool-request (str)
+(defun online-langtool--request-xml (str)
   "Request for checking with given argument `str'.
 Returns a string as parsed xml as a list. "
-  (let* ((enc (--online-langtool-encode str))
-	 (buf1 (url-retrieve-synchronously enc)))
+  (let* ((str (replace-regexp-in-string "[\n\t ]+$" "" str)) ; Cleanup tailing spaces.
+	 (req (format online-langtool--request-pattern
+		      online-langtool--default-language str))
+	 (enc (online-langtool--encode req))
+	 (buf1 (url-retrieve-synchronously enc))) ; A buffer is retrieved.
     (with-current-buffer buf1
       (goto-char url-http-end-of-headers)
       (xml-parse-region (point) (point-max)))))
 
-(defun --online-langtool-check-errors (str)
+(defun online-langtool--request-langtool (text)
+  "New version."
+  (let ((url-request-method "POST")
+	(url-request-extra-headers `(("Content-Type" . "application/x-www-form-urlencoded")
+				     ("Accept" . "application/json")))
+	(url-request-data
+	 (format "text=%s&language=en-US&enabledOnly=false"
+		 (url-encode-url text))))
+    (with-current-buffer (url-retrieve-synchronously "https://languagetool.org/api/v2/check")
+      (goto-char url-http-end-of-headers)
+      (json-read-from-string (buffer-substring (point) (point-max))))))
+
+(defun online-langtool--request-ginger (text)
+  (let ((u (format
+	    "http://services.gingersoftware.com/Ginger/correct/json/GingerTheText?lang=US&clientVersion=2.0&apiKey=6ae0c3a0-afdc-4532-a810-82ded0054236&text=%s"
+	    (url-encode-url text))))
+    (with-current-buffer (url-retrieve-synchronously u)
+      (goto-char url-http-end-of-headers)
+      (json-read-from-string (buffer-substring (point) (point-max))))))
+
+;; (defvar online-langtool--engine "languagetool")
+;; ;; (setq online-langtool--engine "ginger") 
+;; (defun online-langtool--msg-rpls (text)
+;;   (cond ((equal online-langtool--engine "languagetool")
+;; 	 (let* ((js (online-langtool--request-langtool text))
+;; 		(infos (cdr (assoc 'matches js))))
+;; 	   ;; `(,(cdr (assoc 'message infos))
+;; 	   ;;   ,(elt (cdr (assoc 'replacements infos)) 0))
+;; 	   infos))
+;; 	((equal online-langtool--engine "ginger")
+;; 	 (let* ((js (online-langtool--request-ginger text))
+;; 		 (infos (elt (cdr (car js)) 0)))
+;; 	   `(,(format "Confidence level %s" (cdr (assoc 'Confidence infos)))
+;; 	     ,())))
+;; 	(t (error "No such egine."))))
+
+(defun online-langtool--request-check (str)
   "Return a list of error information objects as a list of
 lists. "
-  (let* ((x (--online-langtool-request str))
+  (let* ((x (online-langtool--request-xml str))
 	 (ms (assoc 'matches x)))
     (if ms
 	(let ((errs nil))
@@ -93,30 +133,26 @@ lists. "
 	  errs)
       (error "Failed request."))))
 
-(defun --online-langtool-gen-overlays (str beg end)
-  "Generate overlays for each lexical/syntax error and cache them
-into `--online-langtool-active-overlays' for further looping."
+(defun online-langtool--gen-overlays (str beg end)
+  "Generate overlays for each lexical/syntactic error and cache
+them into `online-langtool--active-overlays' for further
+looping."
   (save-excursion
-    (let* ((errs (--online-langtool-check-errors str)))
-      (dolist (e errs --online-langtool-active-overlays)
-	;; Use `offset' other than `fromx', `tox' to refer positions.
+    (let* ((errs (online-langtool--request-check str)))
+      (dolist (e errs online-langtool--active-overlays)
+	;; Use `offset' rather than `fromx', `tox' to refer positions.
 	(let* ((obeg (+ beg (string-to-int (cdr (assoc 'offset e)))))
 	       (oend (+ obeg (string-to-int (cdr (assoc 'errorlength e)))))
 	       (o (make-overlay obeg oend))
 	       (msg (cdr (assoc 'msg e)))
 	       (rplst (split-string (cdr (assoc 'replacements e)) "#"))
-	       (rps (replace-regexp-in-string "#" "\n* " (cdr (assoc 'replacements e))))
-	       (hint (concat msg (if (zerop (length rps))
-				     nil
-				   (concat "\nReplacements: \n* " rps)))))
+	       (rps (replace-regexp-in-string "#" "\n* " (cdr (assoc 'replacements e)))))
 	  (overlay-put o 'face 'online-langtool-error-face)
-	  (overlay-put o 'help-echo hint)
-	  (overlay-put o 'hint hint)
 	  (overlay-put o 'msg msg)
 	  (overlay-put o 'replacements rplst)
-	  (push o --online-langtool-active-overlays))))))
+	  (push o online-langtool--active-overlays))))))
 
-(defvar --online-langtool-popup-menu-keymap 
+(defvar online-langtool--popup-menu-keymap 
   ;; FIXME: How to define the key with decent manner?
   (let ((map (make-sparse-keymap)))
     (define-key map "<ESC>" 'popup-close)
@@ -132,24 +168,27 @@ into `--online-langtool-active-overlays' for further looping."
 
 ;; Final interactive functions for external use.
 
+;;;###autoload
 (defun online-langtool-set-language (arg)
   "Prompt user to choose a default language for grammar
 checking."
   (interactive
    (list (completing-read
 	  "Choose language: "
-	  --online-langtool-language-list)))
-  (when (member arg --online-langtool-language-list)
-    (setq --online-langtool-default-language arg)))
+	  online-langtool--language-list)))
+  (when (member arg online-langtool--language-list)
+    (setq online-langtool--default-language arg)))
 
+;;;###autoload
 (defun online-langtool-clear-all ()
   "Clear all current error information by both destructing the
 overlays and clear the stack of overlays."
   (interactive)
-  (while --online-langtool-active-overlays
-    (pop --online-langtool-active-overlays))
+  (while online-langtool--active-overlays
+    (pop online-langtool--active-overlays))
   (remove-overlays))
 
+;;;###autoload
 (defun online-langtool-check-region (begin end)
   "Perform grammar check for marked region. Clear all results
 before. A sentence which is too short is not to be checked."
@@ -158,12 +197,13 @@ before. A sentence which is too short is not to be checked."
   (save-excursion
     (if (> (- end begin) 5)
 	(let* ((str (buffer-substring-no-properties begin end)))
-	  (--online-langtool-gen-overlays str begin end))
+	  (online-langtool--gen-overlays str begin end))
       (message "Sentence too short.")))
   (deactivate-mark)
-  (when (< (length --online-langtool-active-overlays) 1)
-    (message "No syntactic error found(Maybe unable to find). ")))
+  (when (< (length online-langtool--active-overlays) 1)
+    (message "No syntactic error found (Maybe unable to find).")))
 
+;;;###autoload
 (defun online-langtool-check-paragraph ()
   (interactive)
   (save-excursion
@@ -171,13 +211,13 @@ before. A sentence which is too short is not to be checked."
     (mark-paragraph)
     (call-interactively 'online-langtool-check-region)))
 
+;;;###autoload
 (defun online-langtool-loop-overlays ()
   "Loop through the overlays and get hints for correction."
   (interactive)
   (require 'popup nil t)
-  (if --online-langtool-active-overlays
-      (let* ((o0 (pop --online-langtool-active-overlays))
-	     (ht (overlay-get o0 'hint))
+  (if online-langtool--active-overlays
+      (let* ((o0 (pop online-langtool--active-overlays))
 	     (msg (overlay-get o0 'msg))
 	     (rps (overlay-get o0 'replacements))
 	     (beg (overlay-start o0))
@@ -185,26 +225,36 @@ before. A sentence which is too short is not to be checked."
 	(goto-char beg)
 	;; Delete overlay object since it is to be checked only once.
 	(remove-overlays beg end)
-	(if (fboundp 'popup-menu*)
-	    (if (and rps
-		     (> (length (car rps)) 0))
-		(let ((sel (popup-menu* rps
-					:prompt msg
-					;; :isearch t :keymap
-					;; --online-langtool-popup-menu-keymap
-					:initial-index 0)))
-		  (when (and (stringp sel)
-			     (> (length sel) 0))
-		    ;; Delete wrong word.
-		    (delete-region beg end)
-		    ;; Insert selected word at current position.
-		    (insert sel)))
-	      ;; Not using `popup-tip', thus keeping style
-	      ;; consistent with `popup-menu'.
-	      (message msg))
-	  ;; If `popup' not available, use naive `message' instead.
-	  (message ht)))
-    (message "No active grammar error. Recheck or give up. ")))
+	;; ;; Style 1: completing-read
+	(let ((w (if (> (length rps) 1)
+		     (completing-read (concat msg " (TAB to show suggestions): ")
+				      rps)
+		   (completing-read (concat msg " : ")
+				    rps nil nil (nth 0 rps)))))
+	  (delete-region beg end)
+	  (insert w))
+	;; ;; Style 2: popup
+	;; (if (fboundp 'popup-menu*)
+	;;     (if (and rps
+	;; 	     (> (length (car rps)) 0))
+	;; 	(let ((sel (popup-menu* rps
+	;; 				:prompt msg
+	;; 				;; :isearch t :keymap
+	;; 				;; online-langtool--popup-menu-keymap
+	;; 				:initial-index 0)))
+	;; 	  (when (and (stringp sel)
+	;; 		     (> (length sel) 0))
+	;; 	    ;; Delete wrong word.
+	;; 	    (delete-region beg end)
+	;; 	    ;; Insert selected word at current position.
+	;; 	    (insert sel)))
+	;;       ;; Not using `popup-tip', thus keeping style
+	;;       ;; consistent with `popup-menu'.
+	;;       (message msg))
+	;;   ;; If `popup' not available, use naive `message' instead.
+	;;   (message ht))
+	)
+    (message "No active grammar error. Recheck or give up.")))
 
 
 ;; Package minor mode declaration.
@@ -219,9 +269,11 @@ before. A sentence which is too short is not to be checked."
     mp)
   "Keymap for using checking functionalities.")
 
+;;;###autoload
 (define-minor-mode online-langtool-mode
   "Use real-time online grammar checking for natural languages powered
 by `www.langtool.org'. "
+  :group 'online-langtool
   :lighter " LangTool"
   :keymap online-langtool-keymap)
 
