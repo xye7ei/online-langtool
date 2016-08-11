@@ -84,6 +84,7 @@ Returns a string as parsed xml as a list. "
       (goto-char url-http-end-of-headers)
       (xml-parse-region (point) (point-max)))))
 
+(defun online-langtool--request-json-langtool (text)
   "New version."
   (let ((url-request-method "POST")
 	(url-request-extra-headers `(("Content-Type" . "application/x-www-form-urlencoded")
@@ -95,6 +96,7 @@ Returns a string as parsed xml as a list. "
       (goto-char url-http-end-of-headers)
       (json-read-from-string (buffer-substring (point) (point-max))))))
 
+(defun online-langtool--request-json-ginger (text)
   (let ((u (format
 	    "http://services.gingersoftware.com/Ginger/correct/json/GingerTheText?lang=US&clientVersion=2.0&apiKey=6ae0c3a0-afdc-4532-a810-82ded0054236&text=%s"
 	    (url-encode-url text))))
@@ -106,11 +108,13 @@ Returns a string as parsed xml as a list. "
 ;; ;; (setq online-langtool--engine "ginger") 
 ;; (defun online-langtool--msg-rpls (text)
 ;;   (cond ((equal online-langtool--engine "languagetool")
+;; 	 (let* ((js (online-langtool--request-json-langtool text))
 ;; 		(infos (cdr (assoc 'matches js))))
 ;; 	   ;; `(,(cdr (assoc 'message infos))
 ;; 	   ;;   ,(elt (cdr (assoc 'replacements infos)) 0))
 ;; 	   infos))
 ;; 	((equal online-langtool--engine "ginger")
+;; 	 (let* ((js (online-langtool--request-json-ginger text))
 ;; 		 (infos (elt (cdr (car js)) 0)))
 ;; 	   `(,(format "Confidence level %s" (cdr (assoc 'Confidence infos)))
 ;; 	     ,())))
