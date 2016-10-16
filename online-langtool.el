@@ -78,7 +78,7 @@ Returns a string as parsed xml as a list. "
   (let* ((str (replace-regexp-in-string "[\n\t ]+$" "" str)) ; Cleanup tailing spaces.
 	 (req (format online-langtool--request-pattern
 		      online-langtool--default-language str))
-	 (enc (online-langtool--encode req))
+	 (enc (url-encode-url req))
 	 (buf1 (url-retrieve-synchronously enc))) ; A buffer is retrieved.
     (with-current-buffer buf1
       (goto-char url-http-end-of-headers)
